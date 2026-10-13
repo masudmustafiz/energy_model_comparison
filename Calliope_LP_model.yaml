@@ -1,0 +1,313 @@
+# ================================================================================
+# Calliope_LP_model.yaml — Building Energy-System Investment Optimisation (LP)
+# PV + Battery + CHP (gas) + Heat Pump + AUX Gas Boiler + TES + Grid
+# under a fixed overnight CAPEX budget.
+#
+# Tool   : Calliope 0.6.10 (Pyomo backend)
+# Solver : Gurobi (called from run_calliope.py)
+#
+# IMPORTANT SINGLE-SOURCE-OF-TRUTH RULE
+# -------------------------------------
+# Do NOT run Calliope directly on this YAML file.
+# `run_calliope.py` generates the timeseries CSVs and passes an `override_dict`
+# containing the numerical model parameters. The finite numbers below are neutral
+# placeholders only where a valid field is useful/required before Python overrides.
+# Structural values such as `.inf`, booleans, carrier names, and file references
+# stay here because they define topology/native Calliope behaviour rather than a
+# thesis parameter value.
+# ================================================================================
+
+
+# ================================================================================
+# MODEL SETTINGS
+# ================================================================================
+model:
+  name: Building LP Investment Optimisation (Calliope)
+  calliope_version: 0.6.10
+  timeseries_data_path: '.'
+  subset_time: null
+
+
+# ================================================================================
+# RUN SETTINGS
+# ================================================================================
+run:
+  mode: plan
+  solver: gurobi
+  backend: pyomo
+  objective_options:
+    cost_class: {monetary: 1}
+    sense: minimize
+  cyclic_storage: true
+
+
+# ================================================================================
+# TECHNOLOGY DEFINITIONS
+# ================================================================================
+techs:
+
+  # Rooftop PV
+  # resource: file=pv_cf.csv -> hourly capacity factor [0..1]
+  # resource_unit: energy_per_cap -> available PV output <= CF[t] * installed capacity
+  # Numerical constraints/costs below are overwritten from Python.
+  pv:
+    essentials:
+      name: 'Rooftop PV'
+      parent: supply
+      carrier_out: el_gen
+    constraints:
+      resource: file=pv_cf.csv
+      resource_unit: energy_per_cap
+      force_resource: true
+      energy_cap_max: .inf
+      energy_eff: 1.0          # placeholder -> Python: PV_EFF
+      lifetime: 1              # placeholder -> Python: LIFE_PV
+    costs:
+      monetary:
+        interest_rate: 0.0     # placeholder -> Python: WACC
+        energy_cap: 0.0        # placeholder -> Python: CAPEX_PV
+
+
+  # Natural Gas Supply
+  # GAS_PRICE is charged here ONCE for every kWh_gas supplied to CHP or AUX.
+  gas_source:
+    essentials:
+      name: 'Natural Gas Supply'
+      parent: supply
+      carrier_out: gas
+    constraints:
+      resource: .inf
+      energy_cap_max: .inf
+    costs:
+      monetary:
+        om_prod: 0.0           # placeholder -> Python: GAS_PRICE
+
+
+  # Grid Import 
+  # Time-varying day-ahead electricity price remains a generated CSV reference.
+  grid_import:
+    essentials:
+      name: 'Grid Import'
+      parent: supply
+      carrier_out: electricity
+    constraints:
+      resource: .inf
+      energy_cap_max: .inf
+    costs:
+      monetary:
+        om_prod: file=grid_price.csv
+
+
+  # Electricity Demand
+  el_demand:
+    essentials:
+      name: 'Electricity Demand'
+      parent: demand
+      carrier: electricity
+    constraints:
+      resource: file=el_demand.csv
+      resource_unit: energy
+
+
+  # Heat Demand
+  heat_demand:
+    essentials:
+      name: 'Heat Demand'
+      parent: demand
+      carrier: heat
+    constraints:
+      resource: file=heat_demand.csv
+      resource_unit: energy
+
+
+  # Grid Export
+  # Native Calliope 0.6.10 optional sink:
+  # force_resource:false changes fixed demand into a lower-bound inequality.
+  # The magnitude limit is overwritten from Python; negative om_con gives revenue.
+  grid_export:
+    essentials:
+      name: 'Grid Export'
+      parent: demand
+      carrier: electricity
+    constraints:
+      resource: -1.0           # placeholder -> Python: -OPTIONAL_SINK_LIMIT
+      resource_unit: energy
+      force_resource: false
+    costs:
+      monetary:
+        om_con: file=neg_feedin.csv
+
+
+  # Heat Dump
+  # Same native optional-sink method as grid_export.
+  heat_dump:
+    essentials:
+      name: 'Heat Dump'
+      parent: demand
+      carrier: heat
+    constraints:
+      resource: -1.0           # placeholder -> Python: -OPTIONAL_SINK_LIMIT
+      resource_unit: energy
+      force_resource: false
+    costs:
+      monetary:
+        om_con: 0.0            # placeholder -> Python: HEAT_DUMP_PENALTY
+
+
+  # ── Li-ion Battery ──────────────────────────────────────────────────────────
+  # Sits on el_gen, so grid electricity cannot charge it directly.
+  # Native 0.6.10 storage constraints used:
+  #   storage_discharge_depth              -> minimum SOC
+  #   storage <= storage_cap               -> native 100% maximum SOC
+  #   energy_cap_per_storage_cap_max       -> maximum C-rate
+  #   storage_cap_max: .inf                -> no exogenous energy-capacity ceiling
+  battery:
+    essentials:
+      name: 'Li-ion Battery'
+      parent: storage
+      carrier: el_gen
+    constraints:
+      energy_eff: 1.0                       # placeholder -> Python: BAT_EFF
+      storage_loss: 0.0                     # placeholder -> Python: BAT_LOSS
+      energy_cap_per_storage_cap_max: 1.0   # placeholder -> Python: BAT_C_RATE
+      storage_discharge_depth: 0.0          # placeholder -> Python: BAT_MIN_SOC
+      storage_cap_max: .inf
+      lifetime: 1                           # placeholder -> Python: LIFE_BAT
+    costs:
+      monetary:
+        interest_rate: 0.0                  # placeholder -> Python: WACC
+        storage_cap: 0.0                    # placeholder -> Python: CAPEX_BAT
+        om_prod: 0.0                        # placeholder -> Python: BAT_OM_PROD
+
+
+  # Thermal Energy Storage (TES)
+  # Sits on heat_chp, so only CHP heat can charge it in this topology.
+  tes:
+    essentials:
+      name: 'Thermal Energy Storage'
+      parent: storage
+      carrier: heat_chp
+    constraints:
+      energy_eff: 1.0                       # placeholder -> Python: TES_EFF
+      storage_loss: 0.0                     # placeholder -> Python: TES_LOSS
+      energy_cap_per_storage_cap_max: 1.0   # placeholder -> Python: TES_C_RATE
+      storage_cap_max: .inf
+      lifetime: 1                           # placeholder -> Python: LIFE_TES
+    costs:
+      monetary:
+        interest_rate: 0.0                  # placeholder -> Python: WACC
+        storage_cap: 0.0                    # placeholder -> Python: CAPEX_TES
+        om_prod: 0.0                        # placeholder -> Python: TES_OM_PROD
+
+
+  # Heat Pump
+  # electricity -> heat; energy_cap is thermal output capacity in this topology.
+  heat_pump:
+    essentials:
+      name: 'Heat Pump'
+      parent: conversion
+      carrier_in: electricity
+      carrier_out: heat
+    constraints:
+      energy_eff: 1.0            # placeholder -> Python: COP_HP
+      energy_cap_max: .inf       # Python: HP_MAX
+      energy_ramping: 1.0        # placeholder -> Python: HP_RAMP
+      lifetime: 1                # placeholder -> Python: LIFE_HP
+    costs:
+      monetary:
+        interest_rate: 0.0       # placeholder -> Python: WACC
+        energy_cap: 0.0          # placeholder -> Python: CAPEX_HP
+
+
+  # CHP (gas engine, multi-output conversion_plus)
+  # gas -> electricity (primary) + heat (secondary)
+  # Primary output is el_gen, so energy_cap and CAPEX_CHP are expressed in kW_el.
+  # Heat output is fixed relative to electricity through carrier_out_2 ratio.
+  chp:
+    essentials:
+      name: 'CHP Unit'
+      parent: conversion_plus
+      carrier_in: gas
+      carrier_out: el_gen
+      carrier_out_2: heat_chp
+      primary_carrier_out: el_gen
+    constraints:
+      energy_eff: 1.0
+      carrier_ratios:
+        carrier_out_2:
+          heat_chp: 1.0          # placeholder -> Python: ETA_TH_CHP / ETA_EL_CHP
+      energy_cap_max: .inf       # Python: CHP_MAX_EL
+      energy_ramping: 1.0        # placeholder -> Python: CHP_RAMP
+      lifetime: 1                # placeholder -> Python: LIFE_CHP
+    costs:
+      monetary:
+        interest_rate: 0.0       # placeholder -> Python: WACC
+        energy_cap: 0.0          # placeholder -> Python: CAPEX_CHP
+
+
+  # Auxiliary Gas Boiler
+  # gas -> heat. Gas is priced at gas_source. AUX om_prod is only the ADDITIONAL
+  # backup-use penalty per kWh_th of heat production, preventing gas double-count.
+  aux_boiler:
+    essentials:
+      name: 'Auxiliary Gas Boiler'
+      parent: conversion
+      carrier_in: gas
+      carrier_out: heat
+    constraints:
+      energy_eff: 1.0            # placeholder -> Python: AUX_EFF
+      energy_cap_max: .inf       # Python: AUX_MAX
+      lifetime: 1                # placeholder -> Python: LIFE_AUX
+    costs:
+      monetary:
+        interest_rate: 0.0       # placeholder -> Python: WACC
+        energy_cap: 0.0          # placeholder -> Python: CAPEX_AUX
+        om_prod: 0.0             # placeholder -> Python: AUX_BACKUP_PENALTY
+
+
+  # el_gen -> electricity bridge
+  # PV + CHP + battery discharge reach the main electricity bus through this wire.
+  el_wire:
+    essentials:
+      name: 'PV/CHP/Bat → Electricity Bus Wire'
+      parent: conversion
+      carrier_in: el_gen
+      carrier_out: electricity
+    constraints:
+      energy_eff: 1.0            # placeholder -> Python: WIRE_EFF
+      energy_cap_max: .inf
+
+
+  # heat_chp -> heat bridge
+  # CHP heat + TES discharge reach the main heat bus through this wire.
+  heat_chp_wire:
+    essentials:
+      name: 'CHP Heat/TES → Heat Bus Wire'
+      parent: conversion
+      carrier_in: heat_chp
+      carrier_out: heat
+    constraints:
+      energy_eff: 1.0            # placeholder -> Python: WIRE_EFF
+      energy_cap_max: .inf
+
+
+# ================================================================================
+# LOCATIONS — single-node model
+# ================================================================================
+locations:
+  site:
+    techs:
+      pv:
+      gas_source:
+      grid_import:
+      el_demand:
+      heat_demand:
+      grid_export:
+      heat_dump:
+      battery:
+      tes:
+      heat_pump:
+      chp:
+      aux_boiler:
+      el_wire:
+      heat_chp_wire:
